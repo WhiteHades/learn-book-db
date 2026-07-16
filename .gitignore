@@ -1,0 +1,8 @@
+/build/
+/build-*/
+/.cache/
+/.book-learning/
+*.db
+*.db-shm
+*.db-wal
+*.tar.gz

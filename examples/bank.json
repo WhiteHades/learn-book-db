@@ -1,0 +1,208 @@
+{
+  "format_version": 1,
+  "book_slug": "example-book",
+  "unit_key": "chapter-1",
+  "concepts": [
+    {
+      "name": "Input and output",
+      "description": "Distinguish information supplied to a model from information it produces.",
+      "importance": "core",
+      "coverage": [
+        "theory",
+        "semantics"
+      ],
+      "source_pages": "0001",
+      "source_line_start": 3,
+      "source_line_end": 10,
+      "justification": "The opening and first body section define input, output, and generation.",
+      "sources": [
+        {
+          "position": 1,
+          "section_key": "opening",
+          "source_pages": "0001",
+          "source_line_start": 3,
+          "source_line_end": 5,
+          "role": "primary",
+          "justification": "The opening introduces the chapter vocabulary."
+        },
+        {
+          "position": 2,
+          "section_key": "1.1",
+          "source_pages": "0001",
+          "source_line_start": 6,
+          "source_line_end": 10,
+          "role": "supporting",
+          "justification": "The numbered section gives the exact distinctions."
+        }
+      ],
+      "tags": [
+        {
+          "kind": "mode",
+          "name": "misconception",
+          "description": "Reject a nearby misconception."
+        },
+        {
+          "kind": "mode",
+          "name": "recall",
+          "description": "Recall a definition without cues."
+        },
+        {
+          "kind": "theme",
+          "name": "llm-basics",
+          "description": "Foundational model behavior."
+        },
+        {
+          "kind": "topic",
+          "name": "input-output",
+          "description": "Information entering and leaving a model."
+        }
+      ],
+      "questions": [
+        {
+          "question_type": "recall",
+          "response_format": "free_response",
+          "prompt": "What is the difference between an input and an output?",
+          "options": null,
+          "expected_answer": "An input is supplied to the model; an output is produced by the model.",
+          "grading_criteria": [
+            "States that input is supplied to the model.",
+            "States that output is produced by the model."
+          ],
+          "answer_justification": "The two definitions appear consecutively in the body section.",
+          "source_section": "1.1 Inputs and outputs",
+          "source_pages": "0001",
+          "source_line_start": 6,
+          "source_line_end": 8,
+          "sources": [
+            {
+              "position": 1,
+              "section_key": "1.1",
+              "source_pages": "0001",
+              "source_line_start": 6,
+              "source_line_end": 8,
+              "role": "primary",
+              "justification": "These lines directly define both terms."
+            }
+          ],
+          "tags": [
+            {
+              "kind": "topic",
+              "name": "input-output",
+              "description": "Information entering and leaving a model."
+            },
+            {
+              "kind": "theme",
+              "name": "llm-basics",
+              "description": "Foundational model behavior."
+            },
+            {
+              "kind": "mode",
+              "name": "recall",
+              "description": "Recall a definition without cues."
+            }
+          ]
+        },
+        {
+          "question_type": "misconception",
+          "response_format": "multiple_choice",
+          "prompt": "What happens to learned parameters during ordinary generation?",
+          "options": [
+            "They stay unchanged.",
+            "They are erased.",
+            "They are retrained."
+          ],
+          "expected_answer": "They stay unchanged.",
+          "grading_criteria": [
+            "Selects that parameters stay unchanged."
+          ],
+          "answer_justification": "The body states that generation does not change learned parameters.",
+          "source_section": "1.1 Inputs and outputs",
+          "source_pages": "0001",
+          "source_line_start": 9,
+          "source_line_end": 9,
+          "tags": [
+            {
+              "kind": "topic",
+              "name": "input-output",
+              "description": "Information entering and leaving a model."
+            },
+            {
+              "kind": "theme",
+              "name": "llm-basics",
+              "description": "Foundational model behavior."
+            },
+            {
+              "kind": "mode",
+              "name": "misconception",
+              "description": "Reject a nearby misconception."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Training and checkpoints",
+      "description": "Connect parameter updates with cumulative checkpoint review.",
+      "importance": "important",
+      "coverage": [
+        "application"
+      ],
+      "source_pages": "0002",
+      "source_line_start": 12,
+      "source_line_end": 15,
+      "justification": "The second body section defines training and checkpoint review.",
+      "tags": [
+        {
+          "kind": "mode",
+          "name": "application",
+          "description": "Apply a distinction to a scenario."
+        },
+        {
+          "kind": "theme",
+          "name": "llm-basics",
+          "description": "Foundational model behavior."
+        },
+        {
+          "kind": "topic",
+          "name": "training",
+          "description": "How model parameters change."
+        }
+      ],
+      "questions": [
+        {
+          "question_type": "application",
+          "response_format": "free_response",
+          "prompt": "A model changes its parameters after examples and feedback. Is this generation or training, and why?",
+          "options": null,
+          "expected_answer": "It is training because the model parameters change using examples and feedback.",
+          "grading_criteria": [
+            "Identifies the process as training.",
+            "Connects training to parameter changes from examples and feedback."
+          ],
+          "answer_justification": "The body defines training by the parameter change described in the scenario.",
+          "source_section": "1.2 Practice",
+          "source_pages": "0002",
+          "source_line_start": 12,
+          "source_line_end": 14,
+          "tags": [
+            {
+              "kind": "topic",
+              "name": "training",
+              "description": "How model parameters change."
+            },
+            {
+              "kind": "theme",
+              "name": "llm-basics",
+              "description": "Foundational model behavior."
+            },
+            {
+              "kind": "mode",
+              "name": "application",
+              "description": "Apply a distinction to a scenario."
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "format_version": 1,
+  "corpora": [
+    {
+      "slug": "example-book",
+      "units": [
+        {
+          "key": "chapter-1",
+          "type": "chapter",
+          "path": "examples/corpus/chapter-1.md",
+          "include_in_quizzes": true,
+          "included_reason": "Small end-to-end example for the public exchange format."
+        }
+      ]
+    }
+  ]
+}

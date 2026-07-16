@@ -1,0 +1,8 @@
+#ifndef LEARN_BOOK_DB_VERSION_H
+#define LEARN_BOOK_DB_VERSION_H
+
+#define LBDB_INTERFACE_NAME "learn-book-db"
+#define LBDB_INTERFACE_VERSION 1
+#define LBDB_SCHEMA_VERSION 1
+
+#endif
