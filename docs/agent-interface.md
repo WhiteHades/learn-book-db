@@ -43,6 +43,11 @@ Corpus manifests and bank files must contain integer `format_version` with value
 versions are validation errors; other versions are unsupported. Follow-up objects accept only the
 canonical `question_type` and `response_format` fields.
 
+Manifest units may declare `coverage_exempt_sections` as an array of unique, non-empty section
+keys. `corpus sync` rejects unknown keys and applies exemptions transactionally. `corpus status`
+sets `coverage_exemptions_match` false when database metadata differs from the manifest. Omitting
+the field is equivalent to an empty array; the manifest is the source of truth for exemptions.
+
 ## Answer secrecy
 
 `quiz next`, `quiz status`, `quiz list`, `report active`, and template output never include an

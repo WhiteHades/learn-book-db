@@ -255,6 +255,7 @@ static bool setup_root(const char *root) {
                                    "      \"key\": \"chapter-1\",\n"
                                    "      \"type\": \"chapter\",\n"
                                    "      \"path\": \"chapter.md\",\n"
+                                   "      \"coverage_exempt_sections\": [\"opening\"],\n"
                                    "      \"include_in_quizzes\": true,\n"
                                    "      \"included_reason\": \"Integration fixture.\"\n"
                                    "    }]\n"
@@ -497,6 +498,14 @@ static bool test_strict_exchange_formats(const char *root) {
     char *future_manifest =
         manifest != NULL ? replace_once(manifest, "\"format_version\": 1", "\"format_version\": 2")
                          : NULL;
+    char *invalid_exemptions =
+        manifest != NULL ? replace_once(manifest, "[\"opening\"]", "\"opening\"") : NULL;
+    char *unknown_exemption =
+        manifest != NULL ? replace_once(manifest, "[\"opening\"]", "[\"missing\"]") : NULL;
+    char *omitted_exemptions =
+        manifest != NULL
+            ? replace_once(manifest, "      \"coverage_exempt_sections\": [\"opening\"],\n", "")
+            : NULL;
     char *missing_bank = bank != NULL ? replace_once(bank, "  \"format_version\": 1,\n", "") : NULL;
     char *future_bank =
         bank != NULL ? replace_once(bank, "\"format_version\": 1", "\"format_version\": 2") : NULL;
@@ -507,7 +516,9 @@ static bool test_strict_exchange_formats(const char *root) {
     check(manifest_path != NULL && bank_path != NULL && missing_bank_path != NULL &&
               future_bank_path != NULL && provenance_bank_path != NULL && manifest != NULL &&
               bank != NULL && missing_manifest != NULL && future_manifest != NULL &&
-              missing_bank != NULL && future_bank != NULL && bad_provenance != NULL,
+              invalid_exemptions != NULL && unknown_exemption != NULL &&
+              omitted_exemptions != NULL && missing_bank != NULL && future_bank != NULL &&
+              bad_provenance != NULL,
           "strict exchange-format fixtures allocate");
 
     RunResult result = expect_success(root, manifest_database, "db.init", COMMAND("db", "init"));
@@ -520,7 +531,21 @@ static bool test_strict_exchange_formats(const char *root) {
           "future manifest version is written");
     result = expect_failure(root, manifest_database, "unsupported", COMMAND("corpus", "sync"));
     run_result_destroy(&result);
+    check(write_file(manifest_path, invalid_exemptions, strlen(invalid_exemptions)),
+          "manifest with malformed coverage exemptions is written");
+    result = expect_failure(root, manifest_database, "validation", COMMAND("corpus", "sync"));
+    run_result_destroy(&result);
+    check(write_file(manifest_path, unknown_exemption, strlen(unknown_exemption)),
+          "manifest with an unknown coverage exemption is written");
+    result = expect_failure(root, manifest_database, "validation", COMMAND("corpus", "sync"));
+    run_result_destroy(&result);
+    check(write_file(manifest_path, omitted_exemptions, strlen(omitted_exemptions)),
+          "manifest without coverage exemptions is written");
+    result = expect_success(root, manifest_database, "corpus.sync", COMMAND("corpus", "sync"));
+    run_result_destroy(&result);
     check(write_file(manifest_path, manifest, manifest_size), "valid manifest is restored");
+    result = expect_success(root, manifest_database, "corpus.sync", COMMAND("corpus", "sync"));
+    run_result_destroy(&result);
 
     static const char *const bank_databases[] = {"bank-missing-format.db", "bank-future-format.db",
                                                  "bank-bad-provenance.db"};
@@ -551,6 +576,9 @@ static bool test_strict_exchange_formats(const char *root) {
     free(bank);
     free(missing_manifest);
     free(future_manifest);
+    free(invalid_exemptions);
+    free(unknown_exemption);
+    free(omitted_exemptions);
     free(missing_bank);
     free(future_bank);
     free(bad_provenance);
@@ -663,8 +691,31 @@ static bool test_database_and_bank(const char *root, const char *roundtrip_root)
     result = expect_success(root, database, "corpus.sync", COMMAND("corpus", "sync"));
     expect_json_integer(result.output, "$.count", 1);
     run_result_destroy(&result);
+    check(sqlite_integer(main_database_path,
+                         "SELECT json_extract(metadata_json,'$.coverage_exempt') FROM "
+                         "source_sections WHERE section_key='opening'") == 1,
+          "corpus sync applies manifest coverage exemptions");
     result = expect_success(root, database, "corpus.status", COMMAND("corpus", "status"));
     expect_json_integer(result.output, "$.in_sync", 1);
+    expect_json_integer(result.output, "$.units[0].coverage_exemptions_match", 1);
+    run_result_destroy(&result);
+    check(sqlite_execute(main_database_path,
+                         "UPDATE source_sections SET metadata_json='{\"note\":7}' WHERE "
+                         "section_key='opening'"),
+          "coverage exemption drift fixture is written");
+    result = expect_success(root, database, "corpus.status", COMMAND("corpus", "status"));
+    expect_json_integer(result.output, "$.in_sync", 0);
+    expect_json_integer(result.output, "$.units[0].coverage_exemptions_match", 0);
+    run_result_destroy(&result);
+    result = expect_success(root, database, "corpus.sync", COMMAND("corpus", "sync"));
+    run_result_destroy(&result);
+    check(sqlite_integer(main_database_path,
+                         "SELECT json_extract(metadata_json,'$.note') FROM source_sections "
+                         "WHERE section_key='opening'") == 7,
+          "corpus sync preserves unrelated section metadata");
+    result = expect_success(root, database, "corpus.status", COMMAND("corpus", "status"));
+    expect_json_integer(result.output, "$.in_sync", 1);
+    expect_json_integer(result.output, "$.units[0].coverage_exemptions_match", 1);
     run_result_destroy(&result);
     result = expect_success(root, database, "bank.validate",
                             COMMAND("bank", "validate", "--allow-incomplete"));

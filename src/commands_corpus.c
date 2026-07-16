@@ -12,6 +12,7 @@ typedef struct LbdbManifestUnit {
     char *source_path;
     char *absolute_path;
     char *included_reason;
+    char *coverage_exempt_sections;
     int64_t position;
     bool include_in_quizzes;
 } LbdbManifestUnit;
@@ -51,6 +52,7 @@ static void manifest_units_destroy(LbdbManifestUnits *units) {
         free(units->items[index].source_path);
         free(units->items[index].absolute_path);
         free(units->items[index].included_reason);
+        free(units->items[index].coverage_exempt_sections);
     }
     free(units->items);
     *units = (LbdbManifestUnits){0};
@@ -161,7 +163,14 @@ static LbdbError load_manifest(LbdbApp *app, LbdbDatabase *database, LbdbManifes
             "SELECT json_extract(c.value,'$.slug'),CAST(u.key AS INTEGER)+1,"
             "json_extract(u.value,'$.key'),json_extract(u.value,'$.type'),"
             "json_extract(u.value,'$.path'),json_type(u.value,'$.include_in_quizzes'),"
-            "json_extract(u.value,'$.included_reason') "
+            "json_extract(u.value,'$.included_reason'),"
+            "coalesce(json_extract(u.value,'$.coverage_exempt_sections'),'[]'),"
+            "CASE WHEN json_type(u.value,'$.coverage_exempt_sections') IS NULL THEN 1 "
+            "WHEN json_type(u.value,'$.coverage_exempt_sections')='array' AND NOT EXISTS("
+            "SELECT 1 FROM json_each(u.value,'$.coverage_exempt_sections') e "
+            "WHERE e.type<>'text' OR trim(e.value)='') AND json_array_length("
+            "u.value,'$.coverage_exempt_sections')=(SELECT count(DISTINCT e.value) "
+            "FROM json_each(u.value,'$.coverage_exempt_sections') e) THEN 1 ELSE 0 END "
             "FROM json_each(?1,'$.corpora') c JOIN json_each(c.value,'$.units') u "
             "ORDER BY CAST(c.key AS INTEGER),CAST(u.key AS INTEGER)",
             &statement);
@@ -181,6 +190,13 @@ static LbdbError load_manifest(LbdbApp *app, LbdbDatabase *database, LbdbManifes
         const char *unit_type = lbdb_statement_column_text(statement, 3);
         const char *source_path = lbdb_statement_column_text(statement, 4);
         const char *included_reason = lbdb_statement_column_text(statement, 6);
+        const char *coverage_exempt_sections = lbdb_statement_column_text(statement, 7);
+        if (lbdb_statement_column_int64(statement, 8) != 1) {
+            error = lbdb_app_fail(
+                app, LBDB_ERROR_VALIDATION,
+                "coverage_exempt_sections must be an array of unique non-empty strings");
+            break;
+        }
         if (!text_present(corpus_slug) || !text_present(unit_key) || !text_present(unit_type) ||
             !text_present(source_path) || !text_present(included_reason) || include_type == NULL ||
             (strcmp(include_type, "true") != 0 && strcmp(include_type, "false") != 0)) {
@@ -205,14 +221,17 @@ static LbdbError load_manifest(LbdbApp *app, LbdbDatabase *database, LbdbManifes
         unit.unit_type = lbdb_string_duplicate(unit_type);
         unit.source_path = lbdb_string_duplicate(source_path);
         unit.included_reason = lbdb_string_duplicate(included_reason);
+        unit.coverage_exempt_sections = lbdb_string_duplicate(coverage_exempt_sections);
         unit.include_in_quizzes = strcmp(include_type, "true") == 0;
         if (unit.corpus_slug == NULL || unit.unit_key == NULL || unit.unit_type == NULL ||
-            unit.source_path == NULL || unit.included_reason == NULL) {
+            unit.source_path == NULL || unit.included_reason == NULL ||
+            unit.coverage_exempt_sections == NULL) {
             free(unit.corpus_slug);
             free(unit.unit_key);
             free(unit.unit_type);
             free(unit.source_path);
             free(unit.included_reason);
+            free(unit.coverage_exempt_sections);
             error = lbdb_app_fail(app, LBDB_ERROR_MEMORY, "Unable to allocate manifest unit");
             break;
         }
@@ -223,6 +242,7 @@ static LbdbError load_manifest(LbdbApp *app, LbdbDatabase *database, LbdbManifes
             free(unit.unit_type);
             free(unit.source_path);
             free(unit.included_reason);
+            free(unit.coverage_exempt_sections);
             break;
         }
         for (size_t index = 0; index < units->count && error == LBDB_OK; ++index) {
@@ -245,6 +265,7 @@ static LbdbError load_manifest(LbdbApp *app, LbdbDatabase *database, LbdbManifes
             free(unit.source_path);
             free(unit.absolute_path);
             free(unit.included_reason);
+            free(unit.coverage_exempt_sections);
         }
     }
     if (error == LBDB_ERROR_SQLITE) {
@@ -557,6 +578,56 @@ static LbdbError insert_sections(LbdbApp *app, LbdbDatabase *database, int64_t u
     return error;
 }
 
+static LbdbError apply_section_exemptions(LbdbApp *app, LbdbDatabase *database,
+                                          const LbdbManifestUnit *unit, int64_t unit_id) {
+    LbdbStatement *statement = NULL;
+    bool has_row = false;
+    LbdbError error = lbdb_statement_prepare(
+        database,
+        "SELECT e.value FROM json_each(?1) e WHERE NOT EXISTS(SELECT 1 FROM source_sections s "
+        "WHERE s.unit_id=?2 AND s.section_key=e.value) ORDER BY CAST(e.key AS INTEGER) LIMIT 1",
+        &statement);
+    if (error == LBDB_OK) {
+        error = lbdb_statement_bind_text(statement, 1, unit->coverage_exempt_sections);
+    }
+    if (error == LBDB_OK) {
+        error = lbdb_statement_bind_int64(statement, 2, unit_id);
+    }
+    if (error == LBDB_OK) {
+        error = lbdb_statement_step(statement, &has_row);
+    }
+    if (error == LBDB_OK && has_row) {
+        error = lbdb_app_fail(app, LBDB_ERROR_VALIDATION,
+                              "Unknown coverage-exempt section: %s/%s/%s", unit->corpus_slug,
+                              unit->unit_key, lbdb_statement_column_text(statement, 0));
+    }
+    lbdb_statement_destroy(statement);
+    statement = NULL;
+    if (error == LBDB_OK) {
+        error = lbdb_statement_prepare(
+            database,
+            "UPDATE source_sections SET metadata_json=CASE WHEN EXISTS(SELECT 1 FROM "
+            "json_each(?1) e WHERE e.value=source_sections.section_key) THEN "
+            "json_set(metadata_json,'$.coverage_exempt',json('true')) ELSE "
+            "json_remove(metadata_json,'$.coverage_exempt') END WHERE unit_id=?2",
+            &statement);
+    }
+    if (error == LBDB_OK) {
+        error = lbdb_statement_bind_text(statement, 1, unit->coverage_exempt_sections);
+    }
+    if (error == LBDB_OK) {
+        error = lbdb_statement_bind_int64(statement, 2, unit_id);
+    }
+    if (error == LBDB_OK) {
+        error = bind_and_step(app, database, statement);
+    }
+    if (error != LBDB_OK && app->error == LBDB_OK) {
+        error = lbdb_app_database_error(app, database, error, "Cannot apply section exemptions");
+    }
+    lbdb_statement_destroy(statement);
+    return error;
+}
+
 static LbdbError synchronize_unit(LbdbApp *app, LbdbDatabase *database,
                                   const LbdbManifestUnit *manifest_unit,
                                   const LbdbSourceDocument *document, const char *digest,
@@ -689,6 +760,9 @@ static LbdbError synchronize_unit(LbdbApp *app, LbdbDatabase *database,
         if (error == LBDB_OK && section_count == 0) {
             error = insert_sections(app, database, *unit_id, document);
         }
+    }
+    if (error == LBDB_OK) {
+        error = apply_section_exemptions(app, database, manifest_unit, *unit_id);
     }
     free(existing_hash);
     return error;
@@ -857,7 +931,13 @@ LbdbError lbdb_command_corpus_status(LbdbCommand *command) {
         if (error == LBDB_OK) {
             error = lbdb_statement_prepare(
                 database,
-                "SELECT id,content_sha256,include_in_quizzes,source_path FROM source_units "
+                "SELECT id,content_sha256,include_in_quizzes,source_path,NOT EXISTS(SELECT 1 "
+                "FROM source_sections s WHERE s.unit_id=source_units.id AND "
+                "((coalesce(json_extract(s.metadata_json,'$.coverage_exempt'),0)=1) <> "
+                "EXISTS(SELECT 1 FROM json_each(?3) e WHERE e.value=s.section_key))) AND "
+                "NOT EXISTS(SELECT 1 FROM json_each(?3) e WHERE NOT EXISTS(SELECT 1 FROM "
+                "source_sections s WHERE s.unit_id=source_units.id AND s.section_key=e.value)) "
+                "AS coverage_exemptions_match FROM source_units "
                 "WHERE corpus_slug=?1 AND unit_key=?2",
                 &statement);
         }
@@ -868,6 +948,10 @@ LbdbError lbdb_command_corpus_status(LbdbCommand *command) {
             error = lbdb_statement_bind_text(statement, 2, units.items[index].unit_key);
         }
         if (error == LBDB_OK) {
+            error =
+                lbdb_statement_bind_text(statement, 3, units.items[index].coverage_exempt_sections);
+        }
+        if (error == LBDB_OK) {
             error = lbdb_statement_step(statement, &has_row);
         }
         if (error != LBDB_OK) {
@@ -875,11 +959,14 @@ LbdbError lbdb_command_corpus_status(LbdbCommand *command) {
         }
         const bool hash_matches = error == LBDB_OK && has_row && source_exists &&
                                   strcmp(lbdb_statement_column_text(statement, 1), digest) == 0;
+        const bool coverage_exemptions_match =
+            error == LBDB_OK && has_row && lbdb_statement_column_int64(statement, 4) == 1;
         const bool in_sync =
             error == LBDB_OK && has_row && hash_matches &&
             lbdb_statement_column_int64(statement, 2) ==
                 (units.items[index].include_in_quizzes ? 1 : 0) &&
-            strcmp(lbdb_statement_column_text(statement, 3), units.items[index].source_path) == 0;
+            strcmp(lbdb_statement_column_text(statement, 3), units.items[index].source_path) == 0 &&
+            coverage_exemptions_match;
         if (!in_sync) {
             all_in_sync = false;
         }
@@ -900,6 +987,8 @@ LbdbError lbdb_command_corpus_status(LbdbCommand *command) {
             LBDB_JSON(app, lbdb_json_bool(app->output, source_exists));
             LBDB_JSON(app, lbdb_json_key(app->output, "hash_matches"));
             LBDB_JSON(app, lbdb_json_bool(app->output, hash_matches));
+            LBDB_JSON(app, lbdb_json_key(app->output, "coverage_exemptions_match"));
+            LBDB_JSON(app, lbdb_json_bool(app->output, coverage_exemptions_match));
             LBDB_JSON(app, lbdb_json_key(app->output, "in_sync"));
             LBDB_JSON(app, lbdb_json_bool(app->output, in_sync));
             LBDB_JSON(app, lbdb_json_end_object(app->output));

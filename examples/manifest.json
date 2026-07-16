@@ -8,6 +8,9 @@
           "key": "chapter-1",
           "type": "chapter",
           "path": "examples/corpus/chapter-1.md",
+          "coverage_exempt_sections": [
+            "opening"
+          ],
           "include_in_quizzes": true,
           "included_reason": "Small end-to-end example for the public exchange format."
         }

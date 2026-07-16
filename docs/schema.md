@@ -17,6 +17,9 @@ tables, indexes, triggers, and views are rejected.
 `source_units` normalizes manifest units and stores the source SHA-256. `source_sections` stores
 line/page bounds parsed from page markers and numbered or summary headings. Source changes are
 accepted only while a unit has no imported concepts or questions.
+Manifest `coverage_exempt_sections` entries set `source_sections.metadata_json.coverage_exempt` for
+non-pedagogical sections that intentionally require no concept. Unknown section keys are rejected,
+and corpus status verifies that database exemptions match the manifest.
 
 `concepts` and `concept_sources` define learning objectives and one or more ordered body passages.
 `question_bank` and `question_sources` hold canonical questions, exact rubrics, ordered source
