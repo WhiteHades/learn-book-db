@@ -1,5 +1,8 @@
 # Schema version 1
 
+The product release follows pre-1.0 semantic versioning (`0.1.n`). Product maturity is separate
+from the integer schema and interface versions used for deterministic compatibility checks.
+
 The database identifies itself with:
 
 - `metadata.schema_version = 1`
