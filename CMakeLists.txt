@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.25)
 
 project(
   learn_book_db
-  VERSION 1.0.1
+  VERSION 1.0.2
   DESCRIPTION "Source-grounded learning and quiz database CLI"
   LANGUAGES C)
 

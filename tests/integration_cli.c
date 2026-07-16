@@ -619,6 +619,8 @@ static void check_terminal_snapshot_guards(const char *root, const char *databas
 
 static bool test_database_and_bank(const char *root, const char *roundtrip_root) {
     static const char *const database = ".book-learning/learning.db";
+    char *main_database_path = path_join(root, database);
+    check(main_database_path != NULL, "main database path allocates");
     RunResult result = expect_success(root, database, "help", COMMAND("--help"));
     check(json_array_length(result.output, "$.commands") == 46, "help lists every fixed command");
     check(strstr(result.output, "bank.import") != NULL &&
@@ -824,6 +826,66 @@ static bool test_database_and_bank(const char *root, const char *roundtrip_root)
     run_result_destroy(&result);
     result = expect_success(root, database, "bank.validate", COMMAND("bank", "validate"));
     expect_json_integer(result.output, "$.valid", 1);
+    expect_json_integer(result.output, "$.uncovered_sections", 0);
+    check(json_array_length(result.output, "$.uncovered_section_records") == 0,
+          "complete validation reports no uncovered sections");
+    run_result_destroy(&result);
+
+    check(sqlite_execute(main_database_path,
+                         "INSERT INTO source_sections(unit_id,section_key,title,position,"
+                         "start_page,end_page,start_line,end_line,is_summary,metadata_json) "
+                         "SELECT id,'synthetic-later','Synthetic later',6,2,2,19,19,0,'{}' "
+                         "FROM source_units WHERE corpus_slug='example-book' AND "
+                         "unit_key='chapter-1';"
+                         "INSERT INTO source_sections(unit_id,section_key,title,position,"
+                         "start_page,end_page,start_line,end_line,is_summary,metadata_json) "
+                         "SELECT id,'synthetic-earlier','Synthetic earlier',5,2,2,18,18,0,'{}' "
+                         "FROM source_units WHERE corpus_slug='example-book' AND "
+                         "unit_key='chapter-1';"
+                         "INSERT INTO source_sections(unit_id,section_key,title,position,"
+                         "start_page,end_page,start_line,end_line,is_summary,metadata_json) "
+                         "SELECT id,'synthetic-exempt','Synthetic exempt',7,2,2,20,20,0,"
+                         "'{\"coverage_exempt\":true}' FROM source_units WHERE "
+                         "corpus_slug='example-book' AND unit_key='chapter-1'"),
+          "uncovered-section fixtures are inserted out of source order");
+    result = expect_failure(root, database, "validation", COMMAND("bank", "validate"));
+    expect_json_integer(result.error, "$.error.details.uncovered_sections", 2);
+    check(json_array_length(result.error, "$.error.details.uncovered_section_records") == 2,
+          "validation errors enumerate required uncovered sections");
+    expect_json_text(result.error, "$.error.details.uncovered_section_records[0].corpus_slug",
+                     "example-book");
+    expect_json_text(result.error, "$.error.details.uncovered_section_records[0].unit_key",
+                     "chapter-1");
+    expect_json_integer(result.error, "$.error.details.uncovered_section_records[0].ordinal", 5);
+    expect_json_text(result.error, "$.error.details.uncovered_section_records[0].title",
+                     "Synthetic earlier");
+    expect_json_integer(result.error, "$.error.details.uncovered_section_records[0].line_start",
+                        18);
+    expect_json_integer(result.error, "$.error.details.uncovered_section_records[0].line_end", 18);
+    expect_json_integer(result.error, "$.error.details.uncovered_section_records[1].ordinal", 6);
+    run_result_destroy(&result);
+    result = expect_success(root, database, "bank.validate",
+                            COMMAND("bank", "validate", "--allow-incomplete"));
+    expect_json_integer(result.output, "$.uncovered_sections", 2);
+    check(json_array_length(result.output, "$.uncovered_section_records") == 2,
+          "incomplete validation returns the suppressed coverage failures");
+    expect_json_text(result.output, "$.uncovered_section_records[0].title", "Synthetic earlier");
+    run_result_destroy(&result);
+    result = expect_success(root, database, "report.coverage", COMMAND("report", "coverage"));
+    check(json_array_length(result.output, "$.uncovered_sections") == 3,
+          "coverage report retains its broad audit semantics");
+    expect_json_text(result.output, "$.uncovered_sections[0].corpus_slug", "example-book");
+    expect_json_text(result.output, "$.uncovered_sections[0].unit_key", "chapter-1");
+    expect_json_integer(result.output, "$.uncovered_sections[0].ordinal", 5);
+    expect_json_text(result.output, "$.uncovered_sections[0].title", "Synthetic earlier");
+    expect_json_integer(result.output, "$.uncovered_sections[0].line_start", 18);
+    expect_json_integer(result.output, "$.uncovered_sections[0].line_end", 18);
+    run_result_destroy(&result);
+    check(sqlite_execute(main_database_path,
+                         "DELETE FROM source_sections WHERE section_key LIKE 'synthetic-%'"),
+          "uncovered-section fixtures are removed");
+    result = expect_success(root, database, "bank.validate", COMMAND("bank", "validate"));
+    expect_json_integer(result.output, "$.uncovered_sections", 0);
     run_result_destroy(&result);
 
     result =
@@ -838,8 +900,6 @@ static bool test_database_and_bank(const char *root, const char *roundtrip_root)
     run_result_destroy(&result);
     char quiz_text[32] = {0};
     format_id(quiz_text, quiz_id);
-    char *main_database_path = path_join(root, database);
-    check(main_database_path != NULL, "main database path allocates");
     check(sqlite_integer(main_database_path,
                          "SELECT count(*) FROM quiz_events WHERE event_type='session_planned'") ==
               1,
@@ -1042,6 +1102,8 @@ static bool test_database_and_bank(const char *root, const char *roundtrip_root)
 
     result = expect_success(root, database, "report.coverage", COMMAND("report", "coverage"));
     expect_json_integer(result.output, "$.units[0].concept_count", 2);
+    check(json_array_length(result.output, "$.uncovered_sections") == 0,
+          "coverage report has no uncovered sections after fixture cleanup");
     run_result_destroy(&result);
     result = expect_success(root, database, "report.mastery", COMMAND("report", "mastery"));
     check(strstr(result.output, "Input and output") != NULL &&

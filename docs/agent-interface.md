@@ -18,6 +18,16 @@ success from an empty error stream.
 `learn-book-db --help GROUP COMMAND` returns deterministic help for one command without opening a
 database.
 
+`bank validate` returns `uncovered_sections` and `uncovered_section_records`. Each record contains
+`corpus_slug`, `unit_key`, `ordinal`, `title`, `line_start`, and `line_end`, ordered by corpus, unit,
+and section position. On a validation failure these fields are under `error.details`; on success,
+including `--allow-incomplete`, they are top-level fields. `--allow-incomplete` suppresses
+completeness failures but still returns the records that were suppressed.
+
+`report coverage` is a broader audit than `bank validate`: it reports every non-summary section
+without linked concepts, including excluded units, exempt sections, and units with no concepts. Its
+uncovered-section rows include the same stable source fields alongside database IDs and titles.
+
 ## Safe references
 
 Unit references accept an integer ID, a globally unique unit key, or `corpus-slug/unit-key`. Tag

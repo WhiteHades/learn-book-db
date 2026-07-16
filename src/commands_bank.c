@@ -2071,12 +2071,77 @@ static LbdbError scalar_count(LbdbApp *app, LbdbDatabase *database, const char *
     return error;
 }
 
+static bool write_uncovered_section(LbdbJsonWriter *writer, LbdbStatement *statement) {
+    return lbdb_json_begin_object(writer) && lbdb_json_key(writer, "corpus_slug") &&
+           lbdb_json_string(writer, lbdb_statement_column_text(statement, 0)) &&
+           lbdb_json_key(writer, "unit_key") &&
+           lbdb_json_string(writer, lbdb_statement_column_text(statement, 1)) &&
+           lbdb_json_key(writer, "ordinal") &&
+           lbdb_json_int(writer, lbdb_statement_column_int64(statement, 2)) &&
+           lbdb_json_key(writer, "title") &&
+           lbdb_json_string(writer, lbdb_statement_column_text(statement, 3)) &&
+           lbdb_json_key(writer, "line_start") &&
+           lbdb_json_int(writer, lbdb_statement_column_int64(statement, 4)) &&
+           lbdb_json_key(writer, "line_end") &&
+           lbdb_json_int(writer, lbdb_statement_column_int64(statement, 5)) &&
+           lbdb_json_end_object(writer);
+}
+
+static LbdbError collect_uncovered_sections(LbdbApp *app, LbdbDatabase *database,
+                                            LbdbJsonWriter **records, int64_t *count) {
+    LbdbStatement *statement = NULL;
+    LbdbJsonWriter *writer = lbdb_json_writer_create(false);
+    bool has_row = false;
+    LbdbError error = LBDB_OK;
+    if (writer == NULL || !lbdb_json_begin_array(writer)) {
+        error = lbdb_app_fail(app, LBDB_ERROR_MEMORY, "Unable to build uncovered sections");
+    }
+    if (error == LBDB_OK) {
+        error = database_failure(
+            app, database,
+            lbdb_statement_prepare(
+                database,
+                "SELECT u.corpus_slug,u.unit_key,s.position,s.title,s.start_line,s.end_line "
+                "FROM source_sections s JOIN source_units u ON u.id=s.unit_id "
+                "WHERE u.include_in_quizzes=1 AND s.is_summary=0 AND "
+                "coalesce(json_extract(s.metadata_json,'$.coverage_exempt'),0)<>1 AND "
+                "EXISTS(SELECT 1 FROM concepts c WHERE c.unit_id=u.id) AND NOT EXISTS("
+                "SELECT 1 FROM concept_sources cs WHERE cs.section_id=s.id) "
+                "ORDER BY u.corpus_slug,u.position,s.position",
+                &statement),
+            "Cannot prepare uncovered-section validation");
+    }
+    while (error == LBDB_OK) {
+        error = step_statement(app, database, statement, &has_row,
+                               "Cannot enumerate uncovered sections");
+        if (error != LBDB_OK || !has_row) {
+            break;
+        }
+        if (!write_uncovered_section(writer, statement)) {
+            error = lbdb_app_fail(app, LBDB_ERROR_MEMORY, "Unable to build uncovered sections");
+            break;
+        }
+        *count += 1;
+    }
+    if (error == LBDB_OK && !lbdb_json_end_array(writer)) {
+        error = lbdb_app_fail(app, LBDB_ERROR_MEMORY, "Unable to build uncovered sections");
+    }
+    lbdb_statement_destroy(statement);
+    if (error == LBDB_OK) {
+        *records = writer;
+    } else {
+        lbdb_json_writer_destroy(writer);
+    }
+    return error;
+}
+
 LbdbError lbdb_command_bank_validate(LbdbCommand *command) {
     LbdbApp *app = command->app;
     LbdbArgs args = {0};
     bool allow_incomplete = false;
     LbdbDatabase *database = NULL;
     LbdbStatement *units = NULL;
+    LbdbJsonWriter *uncovered_section_records = NULL;
     bool has_row = false;
     int64_t source_errors = 0;
     int64_t missing_concepts = 0;
@@ -2196,14 +2261,8 @@ LbdbError lbdb_command_bank_validate(LbdbCommand *command) {
             &concepts_without_questions);
     }
     if (error == LBDB_OK) {
-        error = scalar_count(
-            app, database,
-            "SELECT count(*) FROM source_sections s JOIN source_units u ON u.id=s.unit_id "
-            "WHERE u.include_in_quizzes=1 AND s.is_summary=0 AND "
-            "coalesce(json_extract(s.metadata_json,'$.coverage_exempt'),0)<>1 AND "
-            "EXISTS(SELECT 1 FROM concepts c WHERE c.unit_id=u.id) AND NOT EXISTS("
-            "SELECT 1 FROM concept_sources cs WHERE cs.section_id=s.id)",
-            &uncovered_sections);
+        error = collect_uncovered_sections(app, database, &uncovered_section_records,
+                                           &uncovered_sections);
     }
     if (error == LBDB_OK) {
         error = scalar_count(
@@ -2266,23 +2325,34 @@ LbdbError lbdb_command_bank_validate(LbdbCommand *command) {
                                         uncovered_sections + coverage_errors + template_errors;
     const int64_t total_errors = structural_errors + (allow_incomplete ? 0 : completeness_errors);
     if (error == LBDB_OK && total_errors > 0) {
-        char details[512] = {0};
-        const int length = snprintf(
-            details, sizeof(details),
-            "{\"source_errors\":%lld,\"missing_concepts\":%lld,"
-            "\"invalid_concept_sources\":%lld,\"invalid_question_sources\":%lld,"
-            "\"missing_tag_kinds\":%lld,\"concepts_without_questions\":%lld,"
-            "\"uncovered_sections\":%lld,\"coverage_errors\":%lld,"
-            "\"template_errors\":%lld}",
-            (long long)source_errors, (long long)missing_concepts,
-            (long long)invalid_concept_sources, (long long)invalid_question_sources,
-            (long long)missing_tag_kinds, (long long)concepts_without_questions,
-            (long long)uncovered_sections, (long long)coverage_errors, (long long)template_errors);
-        error = length > 0 && (size_t)length < sizeof(details)
-                    ? lbdb_app_fail_details(app, LBDB_ERROR_VALIDATION, details,
-                                            "Bank validation failed with %lld error(s)",
-                                            (long long)total_errors)
-                    : lbdb_app_fail(app, LBDB_ERROR_VALIDATION, "Bank validation failed");
+        LbdbJsonWriter *details = lbdb_json_writer_create(false);
+        if (details == NULL || !lbdb_json_begin_object(details) ||
+            !lbdb_json_key(details, "source_errors") || !lbdb_json_int(details, source_errors) ||
+            !lbdb_json_key(details, "missing_concepts") ||
+            !lbdb_json_int(details, missing_concepts) ||
+            !lbdb_json_key(details, "invalid_concept_sources") ||
+            !lbdb_json_int(details, invalid_concept_sources) ||
+            !lbdb_json_key(details, "invalid_question_sources") ||
+            !lbdb_json_int(details, invalid_question_sources) ||
+            !lbdb_json_key(details, "missing_tag_kinds") ||
+            !lbdb_json_int(details, missing_tag_kinds) ||
+            !lbdb_json_key(details, "concepts_without_questions") ||
+            !lbdb_json_int(details, concepts_without_questions) ||
+            !lbdb_json_key(details, "uncovered_sections") ||
+            !lbdb_json_int(details, uncovered_sections) ||
+            !lbdb_json_key(details, "uncovered_section_records") ||
+            !lbdb_json_raw(details, lbdb_json_data(uncovered_section_records)) ||
+            !lbdb_json_key(details, "coverage_errors") ||
+            !lbdb_json_int(details, coverage_errors) ||
+            !lbdb_json_key(details, "template_errors") ||
+            !lbdb_json_int(details, template_errors) || !lbdb_json_end_object(details)) {
+            error = lbdb_app_fail(app, LBDB_ERROR_MEMORY, "Unable to build validation details");
+        } else {
+            error = lbdb_app_fail_details(app, LBDB_ERROR_VALIDATION, lbdb_json_data(details),
+                                          "Bank validation failed with %lld error(s)",
+                                          (long long)total_errors);
+        }
+        lbdb_json_writer_destroy(details);
     }
     if (error == LBDB_OK) {
         error = lbdb_output_begin(app, "bank.validate");
@@ -2301,12 +2371,17 @@ LbdbError lbdb_command_bank_validate(LbdbCommand *command) {
             LBDB_JSON(app, lbdb_json_int(app->output, counts[index]));
         }
         LBDB_JSON(app, lbdb_json_end_object(app->output));
+        LBDB_JSON(app, lbdb_json_key(app->output, "uncovered_sections"));
+        LBDB_JSON(app, lbdb_json_int(app->output, uncovered_sections));
+        LBDB_JSON(app, lbdb_json_key(app->output, "uncovered_section_records"));
+        LBDB_JSON(app, lbdb_json_raw(app->output, lbdb_json_data(uncovered_section_records)));
         LBDB_JSON(app, lbdb_json_key(app->output, "warnings"));
         LBDB_JSON(app, lbdb_json_begin_array(app->output));
         LBDB_JSON(app, lbdb_json_end_array(app->output));
         error = lbdb_output_end(app);
     }
     lbdb_statement_destroy(units);
+    lbdb_json_writer_destroy(uncovered_section_records);
     lbdb_database_close(database);
     lbdb_args_destroy(&args);
     return error;

@@ -758,7 +758,9 @@ LbdbError lbdb_command_report_coverage(LbdbCommand *command) {
         error = lbdb_statement_prepare(
             database,
             "SELECT u.id AS unit_id,u.title AS unit_title,s.id AS section_id,"
-            "s.title AS section_title FROM source_sections s JOIN source_units u ON u.id=s.unit_id "
+            "s.title AS section_title,u.corpus_slug,u.unit_key,s.position AS ordinal,"
+            "s.title,s.start_line AS line_start,s.end_line AS line_end FROM source_sections s "
+            "JOIN source_units u ON u.id=s.unit_id "
             "LEFT JOIN concept_sources cs ON cs.section_id=s.id WHERE s.is_summary=0 "
             "GROUP BY s.id HAVING count(cs.concept_id)=0 ORDER BY "
             "u.corpus_slug,u.position,s.position",
