@@ -16,7 +16,7 @@ jobs:
       matrix:
         compiler: [gcc, clang]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install --yes libsqlite3-dev ninja-build
       - name: Configure
@@ -35,7 +35,7 @@ jobs:
   sanitizers:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install --yes libsqlite3-dev ninja-build
       - name: Configure
@@ -53,7 +53,7 @@ jobs:
   formatting:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install clang-format
         run: sudo apt-get update && sudo apt-get install --yes clang-format
       - name: Check formatting
