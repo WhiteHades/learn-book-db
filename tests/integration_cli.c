@@ -636,7 +636,7 @@ static bool test_database_and_bank(const char *root, const char *roundtrip_root)
 
     result = expect_success(root, database, "version", COMMAND("--version"));
     expect_json_text(result.output, "$.name", "learn-book-db");
-    expect_json_text(result.output, "$.version", "1.0.0");
+    expect_json_text(result.output, "$.version", LBDB_TEST_VERSION);
     expect_json_integer(result.output, "$.schema_version", 1);
     run_result_destroy(&result);
 

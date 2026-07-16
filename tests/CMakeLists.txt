@@ -12,6 +12,7 @@ target_compile_definitions(
           _XOPEN_SOURCE=700
           LBDB_CLI_PATH="$<TARGET_FILE:learn-book-db>"
           LBDB_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+          LBDB_TEST_VERSION="${PROJECT_VERSION}"
           LBDB_TEST_WORK_DIR="${CMAKE_CURRENT_BINARY_DIR}/fixtures")
 target_link_libraries(lbdb_integration PRIVATE ${LBDB_SQLITE_TARGET})
 lbdb_enable_warnings(lbdb_integration)
